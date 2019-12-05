@@ -42,12 +42,10 @@
 
 namespace sdm {
 
-int HWCDisplayVirtual::Create(CoreInterface *core_intf, HWCBufferAllocator *buffer_allocator,
-                              HWCCallbacks *callbacks, uint32_t width,
+int HWCDisplayVirtual::Create(CoreInterface *core_intf, HWCCallbacks *callbacks, uint32_t width,
                               uint32_t height, int32_t *format, HWCDisplay **hwc_display) {
   int status = 0;
-  HWCDisplayVirtual *hwc_display_virtual = new HWCDisplayVirtual(core_intf, buffer_allocator,
-                                                                 callbacks);
+  HWCDisplayVirtual *hwc_display_virtual = new HWCDisplayVirtual(core_intf, callbacks);
 
   // TODO(user): Populate format correctly
   DLOGI("Creating virtual display: w: %d h:%d format:0x%x", width, height, *format);
@@ -91,10 +89,9 @@ void HWCDisplayVirtual::Destroy(HWCDisplay *hwc_display) {
   delete hwc_display;
 }
 
-HWCDisplayVirtual::HWCDisplayVirtual(CoreInterface *core_intf, HWCBufferAllocator *buffer_allocator,
-                                     HWCCallbacks *callbacks)
+HWCDisplayVirtual::HWCDisplayVirtual(CoreInterface *core_intf, HWCCallbacks *callbacks)
     : HWCDisplay(core_intf, callbacks, kVirtual, HWC_DISPLAY_VIRTUAL, false, NULL,
-                 DISPLAY_CLASS_VIRTUAL, buffer_allocator) {
+                 DISPLAY_CLASS_VIRTUAL) {
 }
 
 int HWCDisplayVirtual::Init() {

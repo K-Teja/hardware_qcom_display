@@ -84,7 +84,9 @@ bool Allocator::Init() {
   }
 
   adreno_helper_ = new AdrenoMemInfo();
-  adreno_helper_->Init();
+  if (!adreno_helper_->Init()) {
+    return false;
+  }
 
   return true;
 }
@@ -102,7 +104,7 @@ Allocator::~Allocator() {
 int Allocator::AllocateMem(AllocData *alloc_data, gralloc1_producer_usage_t prod_usage,
                            gralloc1_consumer_usage_t cons_usage) {
   int ret;
-  alloc_data->uncached = UseUncached(prod_usage, cons_usage);
+  alloc_data->uncached = UseUncached(prod_usage);
 
   // After this point we should have the right heap set, there is no fallback
   GetIonHeapInfo(prod_usage, cons_usage, &alloc_data->heap_id, &alloc_data->alloc_type,
@@ -127,13 +129,6 @@ int Allocator::MapBuffer(void **base, unsigned int size, unsigned int offset, in
   return -EINVAL;
 }
 
-int Allocator::ImportBuffer(int fd) {
-  if (ion_allocator_) {
-    return ion_allocator_->ImportBuffer(fd);
-  }
-  return -EINVAL;
-}
-
 int Allocator::FreeBuffer(void *base, unsigned int size, unsigned int offset, int fd,
                           int handle) {
   if (ion_allocator_) {
@@ -143,9 +138,9 @@ int Allocator::FreeBuffer(void *base, unsigned int size, unsigned int offset, in
   return -EINVAL;
 }
 
-int Allocator::CleanBuffer(void *base, unsigned int size, unsigned int offset, int handle, int op) {
+int Allocator::CleanBuffer(void *base, unsigned int size, unsigned int offset, int fd, int op) {
   if (ion_allocator_) {
-    return ion_allocator_->CleanBuffer(base, size, offset, handle, op);
+    return ion_allocator_->CleanBuffer(base, size, offset, fd, op);
   }
 
   return -EINVAL;
@@ -164,8 +159,7 @@ bool Allocator::CheckForBufferSharing(uint32_t num_descriptors,
   *max_index = -1;
   for (uint32_t i = 0; i < num_descriptors; i++) {
     // Check Cached vs non-cached and all the ION flags
-    cur_uncached = UseUncached(descriptors[i]->GetProducerUsage(),
-                               descriptors[i]->GetConsumerUsage());
+    cur_uncached = UseUncached(descriptors[i]->GetProducerUsage());
     GetIonHeapInfo(descriptors[i]->GetProducerUsage(), descriptors[i]->GetConsumerUsage(),
                    &cur_heap_id, &cur_alloc_type, &cur_ion_flags);
 
@@ -222,11 +216,7 @@ unsigned int Allocator::GetSize(const BufferDescriptor &descriptor, unsigned int
       size = alignedw * alignedh * 2;
       break;
     case HAL_PIXEL_FORMAT_RAW10:
-    case HAL_PIXEL_FORMAT_RAW12:
       size = ALIGN(alignedw * alignedh, SIZE_4K);
-      break;
-    case HAL_PIXEL_FORMAT_RAW8:
-      size = alignedw * alignedh * 1;
       break;
 
     // adreno formats
@@ -358,16 +348,15 @@ int Allocator::GetYUVPlaneInfo(const private_handle_t *hnd, struct android_ycbcr
   unsigned int ystride, cstride;
 
   memset(ycbcr->reserved, 0, sizeof(ycbcr->reserved));
+  MetaData_t *metadata = reinterpret_cast<MetaData_t *>(hnd->base_metadata);
 
   // Check if UBWC buffer has been rendered in linear format.
-  int linear_format = 0;
-  if (getMetaData(const_cast<private_handle_t*>(hnd), GET_LINEAR_FORMAT, &linear_format) == 0) {
-    format = linear_format;
+  if (metadata && (metadata->operation & LINEAR_FORMAT)) {
+    format = INT(metadata->linearFormat);
   }
 
   // Check metadata if the geometry has been updated.
-  BufferDim_t  buffer_dim = {};
-  if (getMetaData(const_cast<private_handle_t*>(hnd), GET_BUFFER_GEOMETRY, &buffer_dim) == 0) {
+  if (metadata && metadata->operation & UPDATE_BUFFER_GEOMETRY) {
     int usage = 0;
 
     if (hnd->flags & private_handle_t::PRIV_FLAGS_UBWC_ALIGNED) {
@@ -375,7 +364,7 @@ int Allocator::GetYUVPlaneInfo(const private_handle_t *hnd, struct android_ycbcr
     }
 
     BufferDescriptor descriptor =
-        BufferDescriptor(buffer_dim.sliceWidth, buffer_dim.sliceHeight, format,
+        BufferDescriptor(metadata->bufferDim.sliceWidth, metadata->bufferDim.sliceHeight, format,
                          prod_usage, cons_usage);
     GetAlignedWidthAndHeight(descriptor, &width, &height);
   }
@@ -413,7 +402,6 @@ int Allocator::GetYUVPlaneInfo(const private_handle_t *hnd, struct android_ycbcr
     case HAL_PIXEL_FORMAT_NV21_ZSL:
     case HAL_PIXEL_FORMAT_RAW16:
     case HAL_PIXEL_FORMAT_RAW10:
-    case HAL_PIXEL_FORMAT_RAW8:
       GetYuvSPPlaneInfo(hnd->base, width, height, 1, ycbcr);
       std::swap(ycbcr->cb, ycbcr->cr);
       break;
@@ -454,13 +442,10 @@ int Allocator::GetImplDefinedFormat(gralloc1_producer_usage_t prod_usage,
       gr_format = HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS_UBWC;
     } else if (cons_usage & GRALLOC1_CONSUMER_USAGE_VIDEO_ENCODER) {
       gr_format = HAL_PIXEL_FORMAT_NV12_ENCODEABLE;  // NV12
+    } else if (prod_usage & GRALLOC1_PRODUCER_USAGE_PRIVATE_CAMERA_ZSL) {
+      gr_format = HAL_PIXEL_FORMAT_NV21_ZSL;  // NV21 ZSL
     } else if (cons_usage & GRALLOC1_CONSUMER_USAGE_CAMERA) {
-      if (prod_usage & GRALLOC1_PRODUCER_USAGE_CAMERA) {
-        // Assumed ZSL if both producer and consumer camera flags set
-        gr_format = HAL_PIXEL_FORMAT_NV21_ZSL;  // NV21
-      } else {
-        gr_format = HAL_PIXEL_FORMAT_YCrCb_420_SP;  // NV21
-      }
+      gr_format = HAL_PIXEL_FORMAT_YCrCb_420_SP;  // NV21
     } else if (prod_usage & GRALLOC1_PRODUCER_USAGE_CAMERA) {
       if (format == HAL_PIXEL_FORMAT_YCbCr_420_888) {
         gr_format = HAL_PIXEL_FORMAT_NV21_ZSL;  // NV21
@@ -484,7 +469,6 @@ int Allocator::GetImplDefinedFormat(gralloc1_producer_usage_t prod_usage,
 bool Allocator::IsUBwcFormat(int format) {
   switch (format) {
     case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS_UBWC:
-    case HAL_PIXEL_FORMAT_YCbCr_420_TP10_UBWC:
       return true;
     default:
       return false;
@@ -499,8 +483,6 @@ bool Allocator::IsUBwcSupported(int format) {
     case HAL_PIXEL_FORMAT_RGBX_8888:
     case HAL_PIXEL_FORMAT_NV12_ENCODEABLE:
     case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS:
-    case HAL_PIXEL_FORMAT_RGBA_1010102:
-    case HAL_PIXEL_FORMAT_RGBX_1010102:
       return true;
     default:
       break;
@@ -513,27 +495,21 @@ bool Allocator::IsUBwcSupported(int format) {
  * sets the PRIVATE_UNCACHED flag or indicates that the buffer will be rarely
  * read or written in software. */
 // TODO(user) : As of now relying only on producer usage
-bool Allocator::UseUncached(gralloc1_producer_usage_t prod_usage,
-                            gralloc1_consumer_usage_t cons_usage) {
-  if ((prod_usage & GRALLOC1_PRODUCER_USAGE_PRIVATE_UNCACHED) ||
-      (prod_usage & GRALLOC1_PRODUCER_USAGE_PROTECTED)) {
+bool Allocator::UseUncached(gralloc1_producer_usage_t usage) {
+  if ((usage & GRALLOC1_PRODUCER_USAGE_PRIVATE_UNCACHED) ||
+      (usage & GRALLOC1_PRODUCER_USAGE_PROTECTED)) {
     return true;
   }
 
   // CPU read rarely
-  if ((prod_usage & GRALLOC1_PRODUCER_USAGE_CPU_READ) &&
-      !(prod_usage & GRALLOC1_PRODUCER_USAGE_CPU_READ_OFTEN)) {
+  if ((usage & GRALLOC1_PRODUCER_USAGE_CPU_READ) &&
+      !(usage & GRALLOC1_PRODUCER_USAGE_CPU_READ_OFTEN)) {
     return true;
   }
 
   // CPU  write rarely
-  if ((prod_usage & GRALLOC1_PRODUCER_USAGE_CPU_WRITE) &&
-      !(prod_usage & GRALLOC1_PRODUCER_USAGE_CPU_WRITE_OFTEN)) {
-    return true;
-  }
-
-  if ((prod_usage & GRALLOC1_PRODUCER_USAGE_SENSOR_DIRECT_DATA) ||
-      (cons_usage & GRALLOC1_CONSUMER_USAGE_GPU_DATA_BUFFER)) {
+  if ((usage & GRALLOC1_PRODUCER_USAGE_CPU_WRITE) &&
+      !(usage & GRALLOC1_PRODUCER_USAGE_CPU_WRITE_OFTEN)) {
     return true;
   }
 
@@ -545,7 +521,7 @@ void Allocator::GetIonHeapInfo(gralloc1_producer_usage_t prod_usage,
                                unsigned int *alloc_type, unsigned int *ion_flags) {
   unsigned int heap_id = 0;
   unsigned int type = 0;
-  uint32_t flags = 0;
+  unsigned int flags = 0;
   if (prod_usage & GRALLOC1_PRODUCER_USAGE_PROTECTED) {
     if (cons_usage & GRALLOC1_CONSUMER_USAGE_PRIVATE_SECURE_DISPLAY) {
       heap_id = ION_HEAP(SD_HEAP_ID);
@@ -553,17 +529,17 @@ void Allocator::GetIonHeapInfo(gralloc1_producer_usage_t prod_usage,
        * There is currently no flag in ION for Secure Display
        * VM. Please add it to the define once available.
        */
-      flags |= UINT(ION_SD_FLAGS);
+      flags |= ION_SD_FLAGS;
     } else if (prod_usage & GRALLOC1_PRODUCER_USAGE_CAMERA) {
       heap_id = ION_HEAP(SD_HEAP_ID);
       if (cons_usage & GRALLOC1_CONSUMER_USAGE_HWCOMPOSER) {
-        flags |= UINT(ION_SC_PREVIEW_FLAGS);
+        flags |= ION_SC_PREVIEW_FLAGS;
       } else {
-        flags |= UINT(ION_SC_FLAGS);
+        flags |= ION_SC_FLAGS;
       }
     } else {
       heap_id = ION_HEAP(CP_HEAP_ID);
-      flags |= UINT(ION_CP_FLAGS);
+      flags |= ION_CP_FLAGS;
     }
   } else if (prod_usage & GRALLOC1_PRODUCER_USAGE_PRIVATE_MM_HEAP) {
     // MM Heap is exclusively a secure heap.
@@ -576,12 +552,11 @@ void Allocator::GetIonHeapInfo(gralloc1_producer_usage_t prod_usage,
     heap_id |= ION_HEAP(ION_CAMERA_HEAP_ID);
   }
 
-  if (prod_usage & GRALLOC1_PRODUCER_USAGE_PRIVATE_ADSP_HEAP ||
-      prod_usage & GRALLOC1_PRODUCER_USAGE_SENSOR_DIRECT_DATA) {
+  if (prod_usage & GRALLOC1_PRODUCER_USAGE_PRIVATE_ADSP_HEAP) {
     heap_id |= ION_HEAP(ION_ADSP_HEAP_ID);
   }
 
-  if (flags & UINT(ION_SECURE)) {
+  if (flags & ION_SECURE) {
     type |= private_handle_t::PRIV_FLAGS_SECURE_BUFFER;
   }
 
@@ -602,11 +577,6 @@ bool Allocator::IsUBwcEnabled(int format, gralloc1_producer_usage_t prod_usage,
   // Allow UBWC, if client is using an explicitly defined UBWC pixel format.
   if (IsUBwcFormat(format)) {
     return true;
-  }
-
-  if ((prod_usage & GRALLOC1_PRODUCER_USAGE_SENSOR_DIRECT_DATA) ||
-      (cons_usage & GRALLOC1_CONSUMER_USAGE_GPU_DATA_BUFFER)) {
-    return false;
   }
 
   // Allow UBWC, if an OpenGL client sets UBWC usage flag and GPU plus MDP
@@ -748,8 +718,6 @@ int Allocator::GetRgbDataAddress(private_handle_t *hnd, void **rgb_data) {
     case HAL_PIXEL_FORMAT_BGR_565:
     case HAL_PIXEL_FORMAT_RGBA_8888:
     case HAL_PIXEL_FORMAT_RGBX_8888:
-    case HAL_PIXEL_FORMAT_RGBA_1010102:
-    case HAL_PIXEL_FORMAT_RGBX_1010102:
       meta_size = GetRgbUBwcMetaBufferSize(hnd->width, hnd->height, bpp);
       break;
     default:
@@ -806,14 +774,8 @@ void Allocator::GetAlignedWidthAndHeight(const BufferDescriptor &descriptor, uns
     case HAL_PIXEL_FORMAT_RAW16:
       aligned_w = ALIGN(width, 16);
       break;
-    case HAL_PIXEL_FORMAT_RAW12:
-      aligned_w = ALIGN(width * 12 / 8, 8);
-      break;
     case HAL_PIXEL_FORMAT_RAW10:
       aligned_w = ALIGN(width * 10 / 8, 8);
-      break;
-    case HAL_PIXEL_FORMAT_RAW8:
-      aligned_w = ALIGN(width, 8);
       break;
     case HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED:
       aligned_w = ALIGN(width, 128);

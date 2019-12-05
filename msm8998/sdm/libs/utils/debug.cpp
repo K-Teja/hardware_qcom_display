@@ -54,15 +54,11 @@ int Debug::GetHDMIResolution() {
   return value;
 }
 
-void Debug::GetIdleTimeoutMs(uint32_t *active_ms, uint32_t *inactive_ms) {
-  int active_val = IDLE_TIMEOUT_ACTIVE_MS;
-  int inactive_val = IDLE_TIMEOUT_INACTIVE_MS;
+uint32_t Debug::GetIdleTimeoutMs() {
+  int value = IDLE_TIMEOUT_DEFAULT_MS;
+  debug_.debug_handler_->GetProperty("sdm.idle_time", &value);
 
-  debug_.debug_handler_->GetProperty("sdm.idle_time", &active_val);
-  debug_.debug_handler_->GetProperty("sdm.idle_time.inactive", &inactive_val);
-
-  *active_ms = UINT32(active_val);
-  *inactive_ms = UINT32(inactive_val);
+  return UINT32(value);
 }
 
 int Debug::GetBootAnimLayerCount() {
@@ -105,9 +101,9 @@ int Debug::GetMaxPipesPerMixer(DisplayType display_type) {
   return value;
 }
 
-int Debug::GetMaxUpscale() {
+int Debug::GetMaxVideoUpscale() {
   int value = 0;
-  debug_.debug_handler_->GetProperty("sdm.max_upscale", &value);
+  debug_.debug_handler_->GetProperty("sdm.video_max_upscale", &value);
 
   return value;
 }
@@ -163,20 +159,6 @@ bool Debug::IsAVRDisabled() {
 bool Debug::IsExtAnimDisabled() {
   int value = 0;
   debug_.debug_handler_->GetProperty("sys.disable_ext_animation", &value);
-
-  return (value == 1);
-}
-
-bool Debug::IsPartialSplitDisabled() {
-  int value = 0;
-  debug_.debug_handler_->GetProperty("sdm.debug.disable_partial_split", &value);
-
-  return (value == 1);
-}
-
-bool Debug::IsSkipValidateDisabled() {
-  int value = 0;
-  debug_.debug_handler_->GetProperty("sdm.debug.disable_skip_validate", &value);
 
   return (value == 1);
 }
