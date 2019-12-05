@@ -63,8 +63,6 @@ class HWEvents : public HWEventsInterface {
   void HandleThermal(char *data);
   void HandleCECMessage(char *data);
   void HandleThreadExit(char *data) { }
-  void HandleIdlePowerCollapse(char *data);
-  void HandlePingPongTimeout(char *data);
   void PopulateHWEventData();
   DisplayError SetEventParser(HWEvent event_type, HWEventData *event_data);
   pollfd InitializePollFd(HWEventData *event_data);

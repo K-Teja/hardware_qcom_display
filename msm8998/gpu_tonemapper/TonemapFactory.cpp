@@ -24,11 +24,11 @@
 
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
 Tonemapper *TonemapperFactory_GetInstance(int type, void *colorMap, int colorMapSize,
-                                          void *lutXform, int lutXformSize, bool isSecure)
+                                          void *lutXform, int lutXformSize)
 //----------------------------------------------------------------------------------------------------------------------------------------------------------
 {
   // build the tonemapper
-  Tonemapper *tonemapper = Tonemapper::build(type, colorMap, colorMapSize, lutXform, lutXformSize, isSecure);
+  Tonemapper *tonemapper = Tonemapper::build(type, colorMap, colorMapSize, lutXform, lutXformSize);
 
   return tonemapper;
 }

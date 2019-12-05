@@ -3,10 +3,11 @@ include $(CLEAR_VARS)
 include $(LOCAL_PATH)/../../../common.mk
 
 LOCAL_MODULE                  := libsdmcore
-LOCAL_VENDOR_MODULE           := true
+LOCAL_MODULE_PATH_32          := $(TARGET_OUT_VENDOR)/lib
+LOCAL_MODULE_PATH_64          := $(TARGET_OUT_VENDOR)/lib64
 LOCAL_MODULE_TAGS             := optional
-LOCAL_C_INCLUDES              := $(common_includes) $(kernel_includes)
-LOCAL_HEADER_LIBRARIES        := display_headers
+LOCAL_PROPRIETARY_MODULE      := true
+LOCAL_C_INCLUDES              := $(common_includes) $(kernel_includes) $(common_header_export_path)
 LOCAL_CFLAGS                  := -Wno-unused-parameter -DLOG_TAG=\"SDM\" \
                                  $(common_flags)
 ifeq ($(use_hwc2),false)
@@ -19,10 +20,6 @@ ifneq ($(TARGET_IS_HEADLESS), true)
     LOCAL_CFLAGS              += -isystem external/libdrm
     LOCAL_SHARED_LIBRARIES    += libdrm libdrmutils
     LOCAL_HW_INTF_PATH_2      := drm
-endif
-
-ifeq ($(TARGET_USES_DRM_PP),true)
-    LOCAL_CFLAGS              += -DPP_DRM_ENABLE
 endif
 
 LOCAL_ADDITIONAL_DEPENDENCIES := $(common_deps) $(kernel_deps)
@@ -52,15 +49,13 @@ LOCAL_SRC_FILES               := core_interface.cpp \
 ifneq ($(TARGET_IS_HEADLESS), true)
     LOCAL_SRC_FILES           += $(LOCAL_HW_INTF_PATH_2)/hw_info_drm.cpp \
                                  $(LOCAL_HW_INTF_PATH_2)/hw_device_drm.cpp \
-                                 $(LOCAL_HW_INTF_PATH_2)/hw_events_drm.cpp \
-                                 $(LOCAL_HW_INTF_PATH_2)/hw_color_manager_drm.cpp
+                                 $(LOCAL_HW_INTF_PATH_2)/hw_events_drm.cpp
 endif
 
 include $(BUILD_SHARED_LIBRARY)
 
 SDM_HEADER_PATH := ../../include
 include $(CLEAR_VARS)
-LOCAL_VENDOR_MODULE           := true
 LOCAL_COPY_HEADERS_TO         := $(common_header_export_path)/sdm/core
 LOCAL_COPY_HEADERS             = $(SDM_HEADER_PATH)/core/buffer_allocator.h \
                                  $(SDM_HEADER_PATH)/core/buffer_sync_handler.h \
@@ -75,7 +70,6 @@ LOCAL_COPY_HEADERS             = $(SDM_HEADER_PATH)/core/buffer_allocator.h \
 include $(BUILD_COPY_HEADERS)
 
 include $(CLEAR_VARS)
-LOCAL_VENDOR_MODULE           := true
 LOCAL_COPY_HEADERS_TO         := $(common_header_export_path)/sdm/private
 LOCAL_COPY_HEADERS             = $(SDM_HEADER_PATH)/private/color_interface.h \
                                  $(SDM_HEADER_PATH)/private/color_params.h \
